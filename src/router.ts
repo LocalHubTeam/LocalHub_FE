@@ -46,6 +46,8 @@ const routes = [
     name: 'BoardEdit',
     component: BoardEditView,
     props: true,
+  },
+  {
     path: '/locations/:locationId',
     name: 'LocationDetail',
     component: LocationDetailView,
