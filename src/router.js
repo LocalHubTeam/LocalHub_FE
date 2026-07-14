@@ -5,11 +5,20 @@ import BoardCreateView from './views/BoardCreateView.vue';
 import BoardListView from './views/BoardListView.vue';
 import BoardDetailView from './views/BoardDetailView.vue';
 import BoardEditView from './views/BoardEditView.vue';
+import HomePage from './views/HomePage.vue';
+import HomeView from './views/HomeView.vue';
+import AboutView from './views/AboutView.vue';
+import LocationDetailView from './views/LocationDetailView.vue';
 import NotFoundView from './views/NotFoundView.vue';
 const routes = [
     {
         path: '/',
         name: 'Home',
+        component: HomePage,
+    },
+    {
+        path: '/locations',
+        name: 'Locations',
         component: HomeView,
     },
     {
@@ -38,6 +47,9 @@ const routes = [
         name: 'BoardEdit',
         component: BoardEditView,
         props: true,
+        path: '/locations/:locationId',
+        name: 'LocationDetail',
+        component: LocationDetailView,
     },
     {
         path: '/:pathMatch(.*)*',
