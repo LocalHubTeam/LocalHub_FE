@@ -3,6 +3,7 @@
     <header class="app-header">
       <nav>
         <router-link to="/">Home</router-link>
+        <router-link to="/locations">장소목록</router-link>
         <router-link to="/about">About</router-link>
       </nav>
     </header>
