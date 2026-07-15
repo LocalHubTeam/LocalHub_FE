@@ -30,7 +30,7 @@ export type PostsResponse = {
 };
 
 const DEFAULT_API_URL = 'http://localhost:8000';
-const API_BASE_URL = import.meta.env.VITE_API_URL?.trim() || DEFAULT_API_URL;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?.trim() || DEFAULT_API_URL;
 
 function buildUrl(path: string) {
   return `${API_BASE_URL.replace(/\/$/, '')}${path}`;
