@@ -11,12 +11,12 @@
     "esModuleInterop": true,
     "lib": ["ES2020", "DOM"],
     "skipLibCheck": true,
-    "ignoreDeprecations": "6.0",
     "types": ["vite/client"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
-    }
+    },
+    "noEmit": true
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue"],
   "references": [{ "path": "./tsconfig.node.json" }]
