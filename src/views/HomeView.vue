@@ -1399,6 +1399,9 @@ onBeforeUnmount(() => {
 /* 헤더 */
 .app-header {
   margin-bottom: 28px;
+  padding: 18px 20px;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 18px;
 }
 
 .header-logo {
@@ -1420,6 +1423,7 @@ onBeforeUnmount(() => {
   font-size: 26px;
   font-weight: 800;
   letter-spacing: -0.025em;
+  text-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
 }
 
 .header-desc {
