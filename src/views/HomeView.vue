@@ -965,7 +965,7 @@ const focusLocation = (
 };
 
 /**
- * /api/locations에서 장소 정보를 가져옵니다.
+ * /api/maps에서 장소 정보를 가져옵니다.
  *
  * 현재 API 응답 구조:
  *
@@ -983,25 +983,32 @@ const fetchLocations =
     try {
       /*
        * VITE_API_BASE가 있으면:
-       * http://localhost:8080/api/locations
+       * http://localhost:8080/api/maps
        *
        * VITE_API_BASE가 없으면:
-       * /api/locations
+       * /api/maps
        */
       const apiBase = String(
         import.meta.env.VITE_API_BASE || '',
       ).replace(/\/$/, '');
 
-      const url = apiBase
-        ? `${apiBase}/api/locations`
-        : '/api/locations';
+      const primaryUrl = apiBase
+        ? `${apiBase}/api/maps`
+        : '/api/maps';
+
+      const fallbackUrl = apiBase
+        ? `${apiBase}/api/maps.json`
+        : '/api/maps.json';
 
       console.log(
         '장소 API 요청 주소:',
-        url,
+        primaryUrl,
+        '폴백:',
+        fallbackUrl,
       );
 
-      const response = await fetch(url, {
+      // 시도 순서: primary -> fallback (.json)
+      let response = await fetch(primaryUrl, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
@@ -1009,9 +1016,27 @@ const fetchLocations =
       });
 
       if (!response.ok) {
-        throw new Error(
-          `API 요청 실패: ${response.status} ${response.statusText}`,
-        );
+        // 404이면 public 폴더에 있는 locations.json 같은 정적 파일을 시도
+        if (response.status === 404) {
+          const fallbackResp = await fetch(fallbackUrl, {
+            method: 'GET',
+            headers: {
+              Accept: 'application/json',
+            },
+          });
+
+          if (fallbackResp.ok) {
+            response = fallbackResp;
+          } else {
+            throw new Error(
+              `API 요청 실패: ${response.status} ${response.statusText}`,
+            );
+          }
+        } else {
+          throw new Error(
+            `API 요청 실패: ${response.status} ${response.statusText}`,
+          );
+        }
       }
 
       const responseData: unknown =
@@ -1100,19 +1125,22 @@ const fetchLocations =
               /*
                * contenttypeid 기준 카테고리 변환
                */
-              category:
-                CONTENTTYPE_MAP[
-                  contenttypeid
-                ] ?? '',
+              category: String(
+                item.category ??
+                  CONTENTTYPE_MAP[contenttypeid] ??
+                  '',
+              ),
 
               /*
                * 행정구역 코드 기준 지역 변환
                */
-              region:
-                resolveRegionKey(
-                  regnCd,
-                  signguCd,
-                ),
+              region: String(
+                item.region ??
+                  resolveRegionKey(
+                    regnCd,
+                    signguCd,
+                  ) ?? '',
+              ),
 
               contenttypeid,
               lDongRegnCd: regnCd,
