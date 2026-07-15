@@ -20,7 +20,7 @@
       <button type="submit">검색</button>
     </form>
 
-    <div v-if="loading" class="state">비로오는 중...</div>
+    <div v-if="loading" class="state">불러오는 중...</div>
     <div v-else-if="error" class="state error">{{ error }}</div>
     <div v-else>
       <div class="list">
