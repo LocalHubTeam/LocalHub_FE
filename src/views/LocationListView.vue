@@ -3,7 +3,7 @@
     <h1>장소 목록</h1>
     <p>한국관광공사 TourAPI 데이터 · 총 {{ totalItems }}건</p>
 
-    <form class="filters" @submit.prevent="loadLocations">
+    <form class="filters" @submit.prevent="handleSearch">
       <input v-model="keyword" placeholder="검색어 입력" />
       <select v-model="type">
         <option value="">전체 분류</option>
@@ -112,6 +112,10 @@ async function loadLocations(page: number = 1) {
   } finally {
     loading.value = false;
   }
+}
+
+function handleSearch() {
+  loadLocations(1);
 }
 
 function previousPage() {
