@@ -1419,7 +1419,7 @@ onBeforeUnmount(() => {
 
 .app-header h1 {
   margin: 0;
-  color: #fffdf7;
+  color: ##030303;
   font-size: 26px;
   font-weight: 800;
   letter-spacing: -0.025em;
