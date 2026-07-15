@@ -108,21 +108,12 @@
 
           <div class="filters-scroll">
             <button
-              type="button"
-              class="filter-btn region-btn"
-              :class="{ active: selectedRegions.length === 0 }"
-              @click="resetRegions"
-            >
-              전체 지역
-            </button>
-
-            <button
               v-for="region in regionKeys"
               :key="region"
               type="button"
               class="filter-btn region-btn"
-              :class="{ active: selectedRegions.includes(region) }"
-              @click="toggleRegion(region)"
+              :class="{ active: selectedRegion === region }"
+              @click="selectRegion(region)"
             >
               {{ REGION_MAP[region] }}
             </button>
@@ -298,6 +289,7 @@
 </template>
 
 <script setup lang="ts">
+
 import {
   computed,
   onBeforeUnmount,
@@ -329,18 +321,22 @@ interface ApiLocationItem {
   lDongSignguCd?: string | number;
   firstimage?: string;
   firstimage2?: string;
+  category?: string;
+  region?: string;
 }
 
 /**
- * 실제 /api/locations 응답 형식입니다.
+ * 실제 /api/maps 응답 형식입니다.
  *
  * {
  *   total: 112,
+ *   page: 1,
  *   items: [...]
  * }
  */
 interface ApiLocationsResponse {
   total?: number;
+  page?: number;
   items?: ApiLocationItem[];
 }
 
@@ -382,9 +378,21 @@ const activeInfoWindow = ref<any>(null);
 const selectedLocationIdx = ref<number | null>(null);
 
 const searchQuery = ref('');
-const isLoading = ref(true);
+const isLocationsLoading = ref(true);
+const isMapLoading = ref(true);
 const errorMessage = ref('');
 const mapErrorMessage = ref('');
+
+/**
+ * 장소 API 또는 지도 SDK 중 하나라도 처리 중이면
+ * 화면에 로딩 상태를 표시합니다.
+ */
+const isLoading = computed(() => {
+  return (
+    isLocationsLoading.value ||
+    isMapLoading.value
+  );
+});
 
 /**
  * 화면에서 사용하는 카테고리 키와 이름입니다.
@@ -401,7 +409,6 @@ const CATEGORY_MAP: Record<string, string> = {
 };
 
 const categoryKeys = Object.keys(CATEGORY_MAP);
-
 const selectedCategories = ref<string[]>([]);
 
 /**
@@ -430,10 +437,12 @@ const REGION_MAP: Record<string, string> = {
 };
 
 /**
- * lDongRegnCd와 lDongSignguCd 조합으로 지역을 구분합니다.
+ * 각 지역의 API 조회 파라미터를 구성하기 위한 행정구역 코드입니다.
  *
- * 대구는 광역시 전체를 선택하므로 signguCd를 null로 두고
- * lDongRegnCd만 비교합니다.
+ * 예시:
+ * 구미 → 47-190
+ * 칠곡 → 47-850
+ * 대구 → 27
  */
 const REGION_DEFINITIONS: Record<
   string,
@@ -468,33 +477,40 @@ const REGION_DEFINITIONS: Record<
 
 const regionKeys = Object.keys(REGION_MAP);
 
-const selectedRegions = ref<string[]>([]);
+/**
+ * 전체 지역 조회를 방지하기 위해 기본 지역은 구미로 고정합니다.
+ */
+const DEFAULT_REGION = 'gumi';
+const selectedRegion = ref<string>(DEFAULT_REGION);
 
 /**
- * API 지역 코드를 화면 내부 지역 키로 변환합니다.
+ * 화면 내부 지역 키를 API의 region 파라미터 값으로 변환합니다.
  */
-const resolveRegionKey = (
-  regnCd: string,
-  signguCd: string,
+const getRegionParameter = (
+  regionKey: string,
 ): string => {
-  const matchedRegion = Object.entries(
-    REGION_DEFINITIONS,
-  ).find(([, definition]) => {
-    const matchesRegnCd =
-      definition.regnCd === regnCd;
+  const definition =
+    REGION_DEFINITIONS[regionKey];
 
-    const matchesSignguCd =
-      definition.signguCd === null ||
-      definition.signguCd === signguCd;
+  if (!definition) {
+    throw new Error(
+      '유효하지 않은 지역이 선택되었습니다.',
+    );
+  }
 
-    return matchesRegnCd && matchesSignguCd;
-  });
+  if (!definition.signguCd) {
+    return definition.regnCd;
+  }
 
-  return matchedRegion?.[0] ?? '';
+  return (
+    `${definition.regnCd}-` +
+    definition.signguCd
+  );
 };
 
 /**
- * 검색어, 카테고리, 지역 조건을 모두 적용한 결과입니다.
+ * 선택한 지역 데이터 안에서 검색어와 카테고리를 적용합니다.
+ * 지역 필터링은 서버 API에서 처리하므로 프론트에서는 다시 검사하지 않습니다.
  */
 const filteredLocations = computed<LocationItem[]>(
   () => {
@@ -507,12 +523,6 @@ const filteredLocations = computed<LocationItem[]>(
         selectedCategories.value.length === 0 ||
         selectedCategories.value.includes(
           location.category,
-        );
-
-      const matchesRegion =
-        selectedRegions.value.length === 0 ||
-        selectedRegions.value.includes(
-          location.region,
         );
 
       const categoryName =
@@ -538,18 +548,21 @@ const filteredLocations = computed<LocationItem[]>(
 
       return (
         matchesCategory &&
-        matchesRegion &&
         matchesSearch
       );
     });
   },
 );
 
+/**
+ * 기본 상태인 구미·전체 카테고리·검색어 없음과 다른 경우에만
+ * 전체 초기화 버튼을 표시합니다.
+ */
 const hasActiveFilter = computed(() => {
   return (
     searchQuery.value.trim() !== '' ||
     selectedCategories.value.length > 0 ||
-    selectedRegions.value.length > 0
+    selectedRegion.value !== DEFAULT_REGION
   );
 });
 
@@ -632,8 +645,8 @@ const loadKakaoSdk = (): Promise<void> => {
  * 카카오 지도 생성이 완료될 때까지 기다립니다.
  */
 const initMap = (
-  lat = 36.019,
-  lng = 128.3423,
+  lat = 36.1195,
+  lng = 128.3446,
 ): Promise<void> => {
   return new Promise((resolve, reject) => {
     if (!mapContainer.value) {
@@ -860,7 +873,8 @@ const addMarker = (
 };
 
 /**
- * 필터 결과에 맞춰 지도 마커와 지도 범위를 갱신합니다.
+ * 검색어와 카테고리 필터 결과에 맞춰
+ * 지도 마커와 지도 범위를 갱신합니다.
  */
 const updateMarkers = (): void => {
   if (
@@ -964,279 +978,257 @@ const focusLocation = (
     infoWindow;
 };
 
+let requestController: AbortController | null = null;
+let latestRequestId = 0;
+
 /**
- * /api/maps에서 장소 정보를 가져옵니다.
+ * 선택한 지역의 장소만 서버에서 가져옵니다.
  *
- * 현재 API 응답 구조:
- *
- * {
- *   total: 112,
- *   items: [...]
- * }
- *
- * 배열 자체를 반환하는 구조도 함께 지원합니다.
+ * 최초 요청 예시:
+ * http://localhost:8000/api/maps?region=47-190
  */
-const fetchLocations =
-  async (): Promise<LocationItem[]> => {
-    errorMessage.value = '';
+const fetchLocations = async (
+  regionKey: string = selectedRegion.value,
+): Promise<LocationItem[]> => {
+  const requestId = ++latestRequestId;
 
-    try {
-      /*
-       * VITE_API_BASE가 있으면:
-       * http://localhost:8080/api/maps
-       *
-       * VITE_API_BASE가 없으면:
-       * /api/maps
-       */
-      const apiBase = String(
-        import.meta.env.VITE_API_BASE || '',
-      ).replace(/\/$/, '');
+  requestController?.abort();
 
-      const primaryUrl = apiBase
-        ? `${apiBase}/api/maps`
-        : '/api/maps';
+  const controller = new AbortController();
+  requestController = controller;
 
-      const fallbackUrl = apiBase
-        ? `${apiBase}/api/maps.json`
-        : '/api/maps.json';
+  isLocationsLoading.value = true;
+  errorMessage.value = '';
 
-      console.log(
-        '장소 API 요청 주소:',
-        primaryUrl,
-        '폴백:',
-        fallbackUrl,
-      );
+  try {
+    const apiBase = String(
+      import.meta.env.VITE_API_BASE ||
+        'http://localhost:8000',
+    ).replace(/\/$/, '');
 
-      // 시도 순서: primary -> fallback (.json)
-      let response = await fetch(primaryUrl, {
+    const regionParameter =
+      getRegionParameter(regionKey);
+
+    const searchParams =
+      new URLSearchParams({
+        region: regionParameter,
+      });
+
+    const requestUrl =
+      `${apiBase}/api/maps?` +
+      searchParams.toString();
+
+    console.log(
+      '장소 API 요청 주소:',
+      requestUrl,
+    );
+
+    const response = await fetch(
+      requestUrl,
+      {
         method: 'GET',
         headers: {
           Accept: 'application/json',
         },
-      });
+        signal: controller.signal,
+      },
+    );
 
-      if (!response.ok) {
-        // 404이면 public 폴더에 있는 locations.json 같은 정적 파일을 시도
-        if (response.status === 404) {
-          const fallbackResp = await fetch(fallbackUrl, {
-            method: 'GET',
-            headers: {
-              Accept: 'application/json',
-            },
-          });
+    if (!response.ok) {
+      throw new Error(
+        `API 요청 실패: ${response.status} ${response.statusText}`,
+      );
+    }
 
-          if (fallbackResp.ok) {
-            response = fallbackResp;
-          } else {
-            throw new Error(
-              `API 요청 실패: ${response.status} ${response.statusText}`,
-            );
-          }
-        } else {
-          throw new Error(
-            `API 요청 실패: ${response.status} ${response.statusText}`,
-          );
-        }
-      }
+    const responseData: unknown =
+      await response.json();
 
-      const responseData: unknown =
-        await response.json();
+    let items: ApiLocationItem[] = [];
 
-      let items: ApiLocationItem[] = [];
+    if (Array.isArray(responseData)) {
+      items =
+        responseData as ApiLocationItem[];
+    } else if (
+      responseData !== null &&
+      typeof responseData === 'object' &&
+      Array.isArray(
+        (
+          responseData as ApiLocationsResponse
+        ).items,
+      )
+    ) {
+      items =
+        (
+          responseData as ApiLocationsResponse
+        ).items ?? [];
+    } else {
+      throw new Error(
+        'API 응답에서 items 배열을 찾을 수 없습니다.',
+      );
+    }
 
-      /*
-       * 배열이 직접 반환되는 경우
-       */
-      if (Array.isArray(responseData)) {
-        items =
-          responseData as ApiLocationItem[];
-      }
+    const mappedLocations = items
+      .map(
+        (
+          item,
+        ): LocationItem => {
+          const regnCd = String(
+            item.lDongRegnCd ?? '',
+          ).trim();
 
-      /*
-       * {
-       *   total: 112,
-       *   items: [...]
-       * }
-       * 형식으로 반환되는 경우
-       */
-      else if (
-        responseData !== null &&
-        typeof responseData === 'object' &&
-        Array.isArray(
-          (
-            responseData as ApiLocationsResponse
-          ).items,
-        )
-      ) {
-        items =
-          (
-            responseData as ApiLocationsResponse
-          ).items ?? [];
-      } else {
-        throw new Error(
-          'API 응답에서 items 배열을 찾을 수 없습니다.',
-        );
-      }
+          const signguCd = String(
+            item.lDongSignguCd ?? '',
+          ).trim();
 
-      const mappedLocations = items
-        .map(
-          (
-            item,
-          ): LocationItem => {
-            const regnCd = String(
-              item.lDongRegnCd ?? '',
-            );
+          const contenttypeid = String(
+            item.contenttypeid ?? '',
+          ).trim();
 
-            const signguCd = String(
-              item.lDongSignguCd ?? '',
-            );
+          const addr1 = String(
+            item.addr1 ?? '',
+          ).trim();
 
-            const contenttypeid =
-              String(
-                item.contenttypeid ?? '',
-              );
+          const addr2 = String(
+            item.addr2 ?? '',
+          ).trim();
 
-            const addr1 = String(
-              item.addr1 ?? '',
-            ).trim();
+          return {
+            /* mapy는 위도입니다. */
+            lat: Number(item.mapy),
 
-            const addr2 = String(
-              item.addr2 ?? '',
-            ).trim();
+            /* mapx는 경도입니다. */
+            lng: Number(item.mapx),
 
-            return {
-              /*
-               * mapy는 위도입니다.
-               */
-              lat: Number(item.mapy),
+            title: String(
+              item.title ||
+                item.name ||
+                item.addr1 ||
+                '이름 없는 장소',
+            ),
 
-              /*
-               * mapx는 경도입니다.
-               */
-              lng: Number(item.mapx),
+            category: String(
+              item.category ??
+                CONTENTTYPE_MAP[contenttypeid] ??
+                '',
+            ),
 
-              title: String(
-                item.title ||
-                  item.name ||
-                  item.addr1 ||
-                  '이름 없는 장소',
-              ),
+            /* 서버에서 선택 지역만 조회했으므로 현재 지역 키를 사용합니다. */
+            region: regionKey,
 
-              /*
-               * contenttypeid 기준 카테고리 변환
-               */
-              category: String(
-                item.category ??
-                  CONTENTTYPE_MAP[contenttypeid] ??
-                  '',
-              ),
+            contenttypeid,
+            lDongRegnCd: regnCd,
+            lDongSignguCd: signguCd,
 
-              /*
-               * 행정구역 코드 기준 지역 변환
-               */
-              region: String(
-                item.region ??
-                  resolveRegionKey(
-                    regnCd,
-                    signguCd,
-                  ) ?? '',
-              ),
+            contentid: String(
+              item.contentid ?? '',
+            ),
 
-              contenttypeid,
-              lDongRegnCd: regnCd,
-              lDongSignguCd: signguCd,
+            firstimage: String(
+              item.firstimage ||
+                item.firstimage2 ||
+                '',
+            ),
 
-              contentid: String(
-                item.contentid ?? '',
-              ),
+            addr1,
+            addr2,
 
-              firstimage: String(
-                item.firstimage ||
-                  item.firstimage2 ||
-                  '',
-              ),
-
+            fullAddress: [
               addr1,
               addr2,
+            ]
+              .filter(Boolean)
+              .join(' '),
+          };
+        },
+      )
+      .filter((location) => {
+        return (
+          Number.isFinite(location.lat) &&
+          Number.isFinite(location.lng) &&
+          location.lat !== 0 &&
+          location.lng !== 0
+        );
+      });
 
-              fullAddress: [
-                addr1,
-                addr2,
-              ]
-                .filter(Boolean)
-                .join(' '),
-            };
-          },
-        )
-        .filter((location) => {
-          return (
-            Number.isFinite(
-              location.lat,
-            ) &&
-            Number.isFinite(
-              location.lng,
-            )
-          );
-        });
-
-      locationsRef.value =
-        mappedLocations;
-
-      console.log(
-        'API 원본 장소 수:',
-        items.length,
-      );
-
-      console.log(
-        '화면 변환 장소 수:',
-        mappedLocations.length,
-      );
-
-      if (
-        items.length > 0 &&
-        mappedLocations.length === 0
-      ) {
-        errorMessage.value =
-          '불러온 장소 중 유효한 좌표를 가진 데이터가 없습니다.';
-      }
-
-      return mappedLocations;
-    } catch (error) {
-      console.error(
-        '장소 API 연동 실패:',
-        error,
-      );
-
-      locationsRef.value = [];
-
-      /*
-       * fetch 자체가 서버에 접근하지 못한 경우입니다.
-       * 대표적으로 CORS, 프록시, 주소 오류가 있습니다.
-       */
-      if (
-        error instanceof TypeError &&
-        error.message === 'Failed to fetch'
-      ) {
-        errorMessage.value =
-          'API 서버에 연결하지 못했습니다. Vite 프록시, API 주소 또는 CORS 설정을 확인해 주세요.';
-      } else {
-        errorMessage.value =
-          error instanceof Error
-            ? error.message
-            : '장소 정보를 불러오는 중 오류가 발생했습니다.';
-      }
-
+    /*
+     * 더 늦게 시작된 요청이 있으면
+     * 현재 응답으로 화면 상태를 덮어쓰지 않습니다.
+     */
+    if (requestId !== latestRequestId) {
       return [];
     }
-  };
+
+    locationsRef.value =
+      mappedLocations;
+
+    console.log(
+      `${REGION_MAP[regionKey] ?? regionKey} API 원본 장소 수:`,
+      items.length,
+    );
+
+    console.log(
+      `${REGION_MAP[regionKey] ?? regionKey} 화면 변환 장소 수:`,
+      mappedLocations.length,
+    );
+
+    if (
+      items.length > 0 &&
+      mappedLocations.length === 0
+    ) {
+      errorMessage.value =
+        '불러온 장소 중 유효한 좌표를 가진 데이터가 없습니다.';
+    }
+
+    return mappedLocations;
+  } catch (error) {
+    if (
+      error instanceof DOMException &&
+      error.name === 'AbortError'
+    ) {
+      return [];
+    }
+
+    if (requestId !== latestRequestId) {
+      return [];
+    }
+
+    console.error(
+      '장소 API 연동 실패:',
+      error,
+    );
+
+    locationsRef.value = [];
+
+    if (
+      error instanceof TypeError &&
+      error.message === 'Failed to fetch'
+    ) {
+      errorMessage.value =
+        'API 서버에 연결하지 못했습니다. API 주소, 서버 실행 상태 또는 CORS 설정을 확인해 주세요.';
+    } else {
+      errorMessage.value =
+        error instanceof Error
+          ? error.message
+          : '장소 정보를 불러오는 중 오류가 발생했습니다.';
+    }
+
+    return [];
+  } finally {
+    if (requestId === latestRequestId) {
+      isLocationsLoading.value = false;
+
+      if (requestController === controller) {
+        requestController = null;
+      }
+    }
+  }
+};
 
 const toggleCategory = (
   key: string,
 ): void => {
   const index =
-    selectedCategories.value.indexOf(
-      key,
-    );
+    selectedCategories.value.indexOf(key);
 
   if (index >= 0) {
     selectedCategories.value.splice(
@@ -1252,34 +1244,56 @@ const resetCategories = (): void => {
   selectedCategories.value = [];
 };
 
-const toggleRegion = (
+/**
+ * 지역 버튼을 누르면 해당 지역 파라미터로 API를 다시 호출합니다.
+ */
+const selectRegion = async (
   key: string,
-): void => {
-  const index =
-    selectedRegions.value.indexOf(key);
-
-  if (index >= 0) {
-    selectedRegions.value.splice(
-      index,
-      1,
-    );
-  } else {
-    selectedRegions.value.push(key);
+): Promise<void> => {
+  if (!REGION_DEFINITIONS[key]) {
+    errorMessage.value =
+      '유효하지 않은 지역이 선택되었습니다.';
+    return;
   }
-};
 
-const resetRegions = (): void => {
-  selectedRegions.value = [];
+  if (selectedRegion.value === key) {
+    return;
+  }
+
+  selectedRegion.value = key;
+  selectedLocationIdx.value = null;
+
+  clearMarkers();
+
+  await fetchLocations(key);
+
+  /*
+   * 요청 중 사용자가 다른 지역을 선택했다면
+   * 이전 지역의 마커를 생성하지 않습니다.
+   */
+  if (selectedRegion.value === key) {
+    updateMarkers();
+  }
 };
 
 const clearSearch = (): void => {
   searchQuery.value = '';
 };
 
-const resetAllFilters = (): void => {
+/**
+ * 전체 초기화 시에도 전체 지역이 아닌 기본 지역인 구미로 돌아갑니다.
+ */
+const resetAllFilters = async (): Promise<void> => {
   searchQuery.value = '';
   selectedCategories.value = [];
-  selectedRegions.value = [];
+  selectedLocationIdx.value = null;
+
+  if (selectedRegion.value !== DEFAULT_REGION) {
+    await selectRegion(DEFAULT_REGION);
+    return;
+  }
+
+  updateMarkers();
 };
 
 const onSearchInput = (): void => {
@@ -1296,12 +1310,12 @@ const hideBrokenImage = (
 };
 
 /**
- * 검색어 또는 필터가 변경될 때마다 마커를 갱신합니다.
+ * 검색어 또는 카테고리 필터가 변경될 때마다
+ * 현재 지역 데이터 안에서 마커를 갱신합니다.
  */
 watch(
   [
     selectedCategories,
-    selectedRegions,
     searchQuery,
   ],
   () => {
@@ -1313,20 +1327,18 @@ watch(
 );
 
 /**
- * API 요청과 지도 초기화를 동시에 실행합니다.
- *
- * 지도가 실패하더라도 장소 목록은 표시되고,
- * API가 실패하더라도 지도 오류는 별도로 표시됩니다.
+ * 최초 화면에서는 구미 데이터와 카카오 지도를 동시에 준비합니다.
  */
 onMounted(async () => {
-  isLoading.value = true;
   errorMessage.value = '';
   mapErrorMessage.value = '';
 
   const locationsPromise =
-    fetchLocations();
+    fetchLocations(DEFAULT_REGION);
 
   const mapPromise = (async () => {
+    isMapLoading.value = true;
+
     try {
       await loadKakaoSdk();
       await initMap();
@@ -1340,6 +1352,8 @@ onMounted(async () => {
         error instanceof Error
           ? error.message
           : '지도를 초기화하는 중 오류가 발생했습니다.';
+    } finally {
+      isMapLoading.value = false;
     }
   })();
 
@@ -1348,12 +1362,20 @@ onMounted(async () => {
     mapPromise,
   ]);
 
-  isLoading.value = false;
-
-  updateMarkers();
+  /*
+   * 지도와 현재 선택 지역의 장소 요청이 모두 끝난 뒤
+   * 최신 데이터로 마커를 표시합니다.
+   */
+  if (!isLocationsLoading.value) {
+    updateMarkers();
+  }
 });
 
 onBeforeUnmount(() => {
+  latestRequestId += 1;
+  requestController?.abort();
+  requestController = null;
+
   clearMarkers();
   mapRef.value = null;
 });
