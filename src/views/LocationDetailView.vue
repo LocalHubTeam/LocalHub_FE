@@ -1,6 +1,6 @@
 <template>
   <section class="detail-view">
-    <router-link to="/" class="back-link">← 목록으로</router-link>
+    <router-link to="/locations" class="back-link">← 목록으로</router-link>
 
     <div v-if="loading" class="state">불러오는 중...</div>
     <div v-else-if="error" class="state error">{{ error }}</div>
