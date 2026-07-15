@@ -19,6 +19,27 @@
             <div class="message-bubble">
               {{ message.text }}
             </div>
+
+            <div v-if="message.locations?.length" class="location-cards">
+              <router-link
+                v-for="loc in message.locations"
+                :key="loc.contentid"
+                :to="`/locations/${loc.contentid}`"
+                class="location-card"
+                @click="closeChat"
+              >
+                <img
+                  v-if="loc.firstimage2"
+                  :src="loc.firstimage2"
+                  :alt="loc.title"
+                  class="location-card-image"
+                />
+                <div class="location-card-info">
+                  <strong>{{ loc.title }}</strong>
+                  <span>{{ loc.addr1 }}</span>
+                </div>
+              </router-link>
+            </div>
           </div>
 
           <div v-if="isLoading" class="message-row bot">
@@ -81,13 +102,21 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 
 type ChatRole = 'user' | 'bot';
 
+type ChatLocation = {
+  contentid: string;
+  title: string;
+  addr1: string;
+  firstimage2: string;
+};
+
 type ChatMessage = {
   id: number;
   role: ChatRole;
   text: string;
+  locations?: ChatLocation[];
 };
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 const isOpen = ref(false);
 const isMobile = ref(false);
@@ -125,11 +154,12 @@ function closeChat() {
   isOpen.value = false;
 }
 
-function pushMessage(role: ChatRole, text: string) {
+function pushMessage(role: ChatRole, text: string, locations?: ChatLocation[]) {
   messages.value.push({
     id: nextMessageId++,
     role,
     text,
+    locations,
   });
 }
 
@@ -146,12 +176,19 @@ async function sendMessage() {
   try {
     const response = await axios.post(`${API_BASE_URL}/api/chat`, {
       message: text,
+      history: messages.value
+        .filter((m) => m.id !== 1)
+        .map((m) => ({
+          role: m.role === 'bot' ? 'assistant' : 'user',
+          content: m.text,
+        })),
     });
 
     const reply = response.data?.reply;
+    const locations = response.data?.locations as ChatLocation[] | undefined;
 
     if (typeof reply === 'string' && reply.trim()) {
-      pushMessage('bot', reply);
+      pushMessage('bot', reply, locations);
     } else {
       pushMessage('bot', '답변을 받아오지 못했습니다.');
     }
@@ -292,15 +329,17 @@ onBeforeUnmount(() => {
 
 .message-row {
   display: flex;
+  flex-direction: column;
   width: 100%;
+  gap: 6px;
 }
 
 .message-row.user {
-  justify-content: flex-end;
+  align-items: flex-end;
 }
 
 .message-row.bot {
-  justify-content: flex-start;
+  align-items: flex-start;
 }
 
 .message-bubble {
@@ -346,6 +385,57 @@ onBeforeUnmount(() => {
 
 .dot:nth-child(3) {
   animation-delay: 0.3s;
+}
+
+.location-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 82%;
+}
+
+.location-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #d6deea;
+  border-radius: 10px;
+  text-decoration: none;
+  color: inherit;
+  background: #ffffff;
+  transition: box-shadow 0.15s;
+}
+
+.location-card:hover {
+  box-shadow: 0 2px 8px rgba(74, 144, 226, 0.15);
+}
+
+.location-card-image {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.location-card-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.location-card-info strong {
+  font-size: 0.85rem;
+  color: #333333;
+}
+
+.location-card-info span {
+  font-size: 0.75rem;
+  color: #6b7280;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chatbot-input-area {
