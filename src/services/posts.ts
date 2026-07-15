@@ -138,3 +138,10 @@ export async function deletePost(postId: number, password: string) {
 
   return parseResponse<{ message: string }>(response);
 }
+
+export async function incrementPostView(postId: number) {
+  const response = await fetch(buildUrl(`/api/posts/${postId}/view`), {
+    method: 'POST',
+  });
+  return parseResponse<{ view_count: number }>(response);
+}

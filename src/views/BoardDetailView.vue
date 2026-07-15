@@ -66,7 +66,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { deletePost, fetchPost, verifyPostPassword, type Post } from '@/services/posts';
+import {
+  deletePost,
+  fetchPost,
+  verifyPostPassword,
+  incrementPostView,
+  type Post,
+} from '@/services/posts';
 
 const props = defineProps<{ postId: string }>();
 
@@ -101,18 +107,7 @@ function openPasswordModal(mode: 'edit' | 'delete') {
   showPasswordModal.value = true;
 }
 
-function closePasswordModal() {
-  if (submitting.value) {
-    return;
-  }
-
-  showPasswordModal.value = false;
-  passwordInput.value = '';
-  modalError.value = '';
-  modalSuccess.value = '';
-}
-
-async function loadPost() {
+async function loadPostWithViewCount() {
   loading.value = true;
   errorMessage.value = '';
 
@@ -121,7 +116,19 @@ async function loadPost() {
       throw new Error('잘못된 게시글 번호입니다.');
     }
 
-    post.value = await fetchPost(postIdNumber.value);
+    // 데이터 가져오기
+    const fetchedPost = await fetchPost(postIdNumber.value);
+    post.value = fetchedPost;
+
+    // 안전하게 조회수 올리기
+    try {
+      const result = await incrementPostView(postIdNumber.value);
+      if (post.value) {
+        post.value.view_count = result.view_count;
+      }
+    } catch (viewError) {
+      console.warn('조회수 증가 실패:', viewError);
+    }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '게시글을 불러오지 못했습니다.';
   } finally {
@@ -173,11 +180,12 @@ async function confirmPassword() {
 watch(
   () => props.postId,
   () => {
-    loadPost();
+    void loadPostWithViewCount();
   },
+  { immediate: true } // 최초 마운트 시에도 자동으로 loadPostWithViewCount를 실행해 줍니다.
 );
 
-onMounted(loadPost);
+
 </script>
 
 <style scoped>
